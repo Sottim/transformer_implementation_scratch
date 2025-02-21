@@ -1,6 +1,6 @@
 import torch
-from transformer import GPT2LMHeadModel
-from transformer import GPT2Tokenizer
+from transformers import GPT2LMHeadModel
+from transformers import GPT2Tokenizer
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from tqdm import tqdm
@@ -18,6 +18,9 @@ def train_model(transformer, dataloader, optimizer, scheduler, device, epochs, t
     log("Starting training...")
     log(f"Training on: {device}")
     log(f"Number of batches per epoch: {len(dataloader)}\n")
+
+    early_stopping_patience = 3  # Stop training if no improvement in 3 epochs
+    epochs_without_improvement = 0
 
     for epoch in range(epochs):
         total_loss = 0
@@ -51,12 +54,13 @@ def train_model(transformer, dataloader, optimizer, scheduler, device, epochs, t
             loss.backward()
             torch.nn.utils.clip_grad_norm_(transformer.parameters(), 1.0)
             optimizer.step()
-            scheduler.step()
+            
+            avg_loss = total_loss / (batch_idx + 1)
+            scheduler.step(avg_loss)
             
             total_loss += loss.item()
             
             # Update progress bar
-            avg_loss = total_loss / (batch_idx + 1)
             accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
             progress_bar.set_postfix(loss=f"{loss.item():.4f}", avg_loss=f"{avg_loss:.4f}", acc=f"{accuracy:.4f}")
 
@@ -73,6 +77,13 @@ def train_model(transformer, dataloader, optimizer, scheduler, device, epochs, t
             best_loss = avg_loss
             torch.save(transformer.state_dict(), "./save_model/transformer_best.pth")
             log("Best model saved!")
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= early_stopping_patience:
+                log("Early stopping triggered!")
+                break
+
 
         # Save checkpoint every 5 epochs
         if (epoch + 1) % 10 == 0:
@@ -100,20 +111,20 @@ def main():
     num_heads = 8
     d_model = 512
     d_ff = 2048
-    dropout = 0.1
+    dropout = 0.3
     max_seq_len = 512
     input_vocab_size = tokenizer.vocab_size
     target_vocab_size = tokenizer.vocab_size
 
     learning_rate = 3e-4
-    epochs = 200
+    epochs = 50
 
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     
     transformer = Transformer(num_layers, d_model, num_heads, d_ff, input_vocab_size, target_vocab_size, max_seq_len, dropout).to(device)
 
-    optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0001)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, len(dataloader) * epochs)
+    optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0001, weight_decay=0.01) # weight_decay is L2 regularization to penilize large weights
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
 
     try:
         train_model(transformer, dataloader, optimizer, scheduler, device, epochs, tokenizer)

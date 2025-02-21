@@ -5,7 +5,7 @@ import math
 from tqdm import tqdm
 import numpy as np
 
-
+from transformers import GPT2Tokenizer
 
 class MultiheadAttention(nn.Module):
     def __init__(self, d_model, num_heads):
