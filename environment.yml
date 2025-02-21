@@ -1,0 +1,29 @@
+name: llm  # Name of your environment
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pip
+  - pip:
+      - aiohttp==3.11.12
+      - aiosignal==1.3.2
+      - datasets==3.3.0
+      - dill==0.3.8
+      - filelock==3.17.0
+      - fsspec==2024.12.0
+      - huggingface-hub==0.28.1
+      - numpy==2.0.2
+      - pandas==2.2.3
+      - pyarrow==19.0.0
+      - pyyaml==6.0.2
+      - regex==2024.11.6
+      - requests==2.32.3
+      - safetensors==0.5.2
+      - tokenizers==0.21.0
+      - torch==2.6.0
+      - torchvision==0.21.0
+      - tqdm==4.67.1
+      - transformers==4.48.3
+      - triton==3.2.0
+      - xxhash==3.5.0
