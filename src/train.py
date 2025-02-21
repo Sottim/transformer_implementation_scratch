@@ -1,6 +1,6 @@
 import torch
-from transformers import GPT2LMHeadModel
-from transformers import GPT2Tokenizer
+from transformer import GPT2LMHeadModel
+from transformer import GPT2Tokenizer
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from tqdm import tqdm
