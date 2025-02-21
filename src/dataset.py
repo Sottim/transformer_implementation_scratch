@@ -1,6 +1,6 @@
 import torch 
 from torch.utils.data import Dataset
-from transformers import GPT2Tokenizer
+from transformer import GPT2Tokenizer
 
 class TextDataset(Dataset):
     """
