@@ -98,8 +98,6 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(42)
 
-    model = GPT2LMHeadModel.from_pretrained('gpt2')
-    model.to(device)
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -117,11 +115,14 @@ def main():
     target_vocab_size = tokenizer.vocab_size
 
     learning_rate = 3e-4
-    epochs = 50
+    epochs = 40
 
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     
+    # Initialize custom Transformer and load GPT-2 weights
     transformer = Transformer(num_layers, d_model, num_heads, d_ff, input_vocab_size, target_vocab_size, max_seq_len, dropout).to(device)
+    gpt2model = GPT2LMHeadModel.from_pretrained('gpt2')
+    transformer.load_state_dict(gpt2model.state_dict(), strict=False) # Load GPT-2 weights with Partial match if architectures differ slightly
 
     optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0001, weight_decay=0.01) # weight_decay is L2 regularization to penilize large weights
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
