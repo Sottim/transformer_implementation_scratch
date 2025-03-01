@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Log files
+logs/
+*.log
+
+# Cache and temporary files
+*.tmp
+*.swp
+*.swo
+*.DS_Store
+
+# VS Code settings
+.vscode/
+
+# Checkpoints and saved models
+checkpoints/
+*.ckpt
+*.pth
+*.h5
+
+# Data files
+processed_data/
+*.txt
+*.csv
