@@ -238,24 +238,46 @@ class Transformer(nn.Module):
         output = self.final_layer(decoder_output)
         return output
     
-
-    
-
-
-
-
-
-
-
+    def generate(self, src, src_mask, max_length=100, temperature=0.7, top_k=40, top_p=0.9, do_sample=False, tokenizer=None):
+        if tokenizer is None:
+            raise ValueError("Tokenizer must be provided for generation")
         
-
-
+        self.eval()
+        batch_size = src.size(0)
+        generated = src.clone()
         
-
-
-    
+        with torch.no_grad():
+            for _ in range(max_length - src.size(1)):
+                outputs = self(src=generated, tgt=generated, src_mask=src_mask, tgt_mask=src_mask)
+                next_token_logits = outputs[:, -1, :] / temperature
+                
+                if do_sample:
+                    filtered_logits = self.top_k_top_p_filtering(next_token_logits, top_k, top_p)
+                    next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
+                else:
+                    next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+                
+                generated = torch.cat([generated, next_token], dim=1)
+                src_mask = torch.cat([src_mask, torch.ones(batch_size, 1).to(src.device)], dim=1)
+                
+                if (next_token == tokenizer.eos_token_id).all():
+                    break
         
+        return generated
 
+    def top_k_top_p_filtering(self, logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
+        if top_k > 0:
+            top_k = min(top_k, logits.size(-1))
+            indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
+            logits[indices_to_remove] = filter_value
 
+        if top_p > 0.0:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+            sorted_indices_to_remove = cumulative_probs > top_p
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+            sorted_indices_to_remove[..., 0] = 0
+            indices_to_remove = sorted_indices[sorted_indices_to_remove]
+            logits[indices_to_remove] = filter_value
 
-
+        return logits
