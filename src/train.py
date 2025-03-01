@@ -1,12 +1,10 @@
 import torch
-from transformers import GPT2LMHeadModel
-from transformers import GPT2Tokenizer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from torch.utils.data import DataLoader, SubsetRandomSampler
 import torch.nn as nn
 from tqdm import tqdm
 import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
-
 from dataset import TextDataset
 from transformer import Transformer
 from logger import log
@@ -58,61 +56,67 @@ def train_model(transformer, train_loader, val_loader, optimizer, scheduler, dev
         train_avg_loss = train_loss / len(train_loader)
         train_accuracy = train_correct / train_total if train_total > 0 else 0
 
-        # Validation phase
-        transformer.eval()
-        val_loss = 0
-        val_correct = 0
-        val_total = 0
+        # Validation phase (every 5th epoch)
+        if (epoch + 1) % 5 == 0:
+            transformer.eval()
+            val_loss = 0
+            val_correct = 0
+            val_total = 0
 
-        with torch.no_grad():
-            val_progress = tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]", unit="batch")
-            for batch in val_progress:
-                input_ids = batch['input_ids'].to(device)
-                target_ids = batch['target_ids'].to(device)
-                src_mask = batch['attention_mask'].to(device)
-                tgt_mask = batch['target_attention_mask'].to(device)
-                
-                outputs = transformer(src=input_ids, tgt=target_ids, src_mask=src_mask, tgt_mask=tgt_mask)
-                loss = criterion(outputs.view(-1, outputs.size(-1)), target_ids.view(-1))
-                
-                predictions = outputs.argmax(dim=-1)
-                mask = target_ids != tokenizer.pad_token_id
-                val_correct += (predictions[mask] == target_ids[mask]).sum().item()
-                val_total += mask.sum().item()
-                
-                val_loss += loss.item()
-                val_avg_loss = val_loss / (val_progress.n + 1)
-                val_accuracy = val_correct / val_total if val_total > 0 else 0
-                val_progress.set_postfix(loss=f"{loss.item():.4f}", avg_loss=f"{val_avg_loss:.4f}", acc=f"{val_accuracy:.4f}")
+            with torch.no_grad():
+                val_progress = tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]", unit="batch")
+                for batch in val_progress:
+                    input_ids = batch['input_ids'].to(device)
+                    target_ids = batch['target_ids'].to(device)
+                    src_mask = batch['attention_mask'].to(device)
+                    tgt_mask = batch['target_attention_mask'].to(device)
+                    
+                    outputs = transformer(src=input_ids, tgt=target_ids, src_mask=src_mask, tgt_mask=tgt_mask)
+                    loss = criterion(outputs.view(-1, outputs.size(-1)), target_ids.view(-1))
+                    
+                    predictions = outputs.argmax(dim=-1)
+                    mask = target_ids != tokenizer.pad_token_id
+                    val_correct += (predictions[mask] == target_ids[mask]).sum().item()
+                    val_total += mask.sum().item()
+                    
+                    val_loss += loss.item()
+                    val_avg_loss = val_loss / (val_progress.n + 1)
+                    val_accuracy = val_correct / val_total if val_total > 0 else 0
+                    val_progress.set_postfix(loss=f"{loss.item():.4f}", avg_loss=f"{val_avg_loss:.4f}", acc=f"{val_accuracy:.4f}")
 
-        val_avg_loss = val_loss / len(val_loader)
-        val_accuracy = val_correct / val_total if val_total > 0 else 0
+            val_avg_loss = val_loss / len(val_loader)
+            val_accuracy = val_correct / val_total if val_total > 0 else 0
 
-        # Logging epoch stats
-        log(f"\nEpoch {epoch+1} Summary:")
-        log(f"Train Loss: {train_avg_loss:.4f} | Train Accuracy: {train_accuracy:.4f}")
-        log(f"Val Loss: {val_avg_loss:.4f} | Val Accuracy: {val_accuracy:.4f}")
+            # Logging epoch stats (including validation)
+            log(f"\nEpoch {epoch+1} Summary:")
+            log(f"Train Loss: {train_avg_loss:.4f} | Train Accuracy: {train_accuracy:.4f}")
+            log(f"Val Loss: {val_avg_loss:.4f} | Val Accuracy: {val_accuracy:.4f}")
 
-        # Update scheduler based on validation loss
-        scheduler.step(val_avg_loss)
+            # Update scheduler based on validation loss
+            scheduler.step(val_avg_loss)
 
-        # Save best model based on validation loss
-        if val_avg_loss < best_val_loss:
-            best_val_loss = val_avg_loss
-            torch.save(transformer.state_dict(), "./save_model/transformer_best.pth")
-            log("Best model saved (based on validation loss)!")
-            epochs_without_improvement = 0
+            # Save best model based on validation loss
+            if val_avg_loss < best_val_loss:
+                best_val_loss = val_avg_loss
+                torch.save(transformer.state_dict(), "./save_model/model_02_best.pth")
+                log("Best model saved (based on validation loss)!")
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+                log(f"No improvement in validation loss. Patience: {epochs_without_improvement}/{early_stopping_patience}")
+                if epochs_without_improvement >= early_stopping_patience:
+                    log("Early stopping triggered!")
+                    break
         else:
-            epochs_without_improvement += 1
-            log(f"No improvement in validation loss. Patience: {epochs_without_improvement}/{early_stopping_patience}")
-            if epochs_without_improvement >= early_stopping_patience:
-                log("Early stopping triggered!")
-                break
+            # Log training stats only when not validating
+            log(f"\nEpoch {epoch+1} Summary:")
+            log(f"Train Loss: {train_avg_loss:.4f} | Train Accuracy: {train_accuracy:.4f}")
 
         # Save checkpoint every 5 epochs
         if (epoch + 1) % 5 == 0:
-            torch.save(transformer.state_dict(), f"./checkpoints/model_checkpoint_epoch_{epoch+1}.pth")
+            torch.save(transformer.state_dict(), f"./checkpoints/02_model_checkpoint_epoch_{epoch+1}.pth")
             log(f"Checkpoint saved at epoch {epoch+1}.\n")
+            
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log(f"Using {device} device")
@@ -136,13 +140,11 @@ def main():
     max_seq_len = 512
     input_vocab_size = tokenizer.vocab_size
     target_vocab_size = tokenizer.vocab_size
-
-    learning_rate = 3e-4
     epochs = 40
 
-    # Split the dataset into training and validation sets
+    # Split the dataset into 90% training and 10% validation
     indices = list(range(len(dataset)))
-    train_indices, val_indices = train_test_split(indices, test_size=0.2, random_state=42)  # 80% train, 20% val
+    train_indices, val_indices = train_test_split(indices, test_size=0.1, random_state=42)  # 90% train, 10% val
     train_sampler = SubsetRandomSampler(train_indices)
     val_sampler = SubsetRandomSampler(val_indices)
 
@@ -154,20 +156,18 @@ def main():
     # Initialize custom Transformer and load GPT-2 weights
     transformer = Transformer(num_layers, d_model, num_heads, d_ff, input_vocab_size, target_vocab_size, max_seq_len, dropout).to(device)
     gpt2model = GPT2LMHeadModel.from_pretrained('gpt2')
-    transformer.load_state_dict(gpt2model.state_dict(), strict=False) # Load GPT-2 weights with Partial match if architectures differ slightly
+    transformer.load_state_dict(gpt2model.state_dict(), strict=False)
 
-    optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0001, weight_decay=0.01) # weight_decay is L2 regularization to penilize large weights
+    optimizer = torch.optim.Adam(transformer.parameters(), lr=3e-4, weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
 
     try:
         train_model(transformer, train_loader, val_loader, optimizer, scheduler, device, epochs, tokenizer)
         log("\nTraining completed successfully!")
-
     except Exception as e:
         log(f"\nTraining interrupted: {str(e)}")
-
     finally:
-        torch.save(transformer.state_dict(), "./save_model/final_model_weights.pth")
+        torch.save(transformer.state_dict(), "./save_model/02_final_model_weights.pth")
         log("Final model saved!")
 
 if __name__ == "__main__":
