@@ -19,7 +19,6 @@ logs/
 # Checkpoints and saved models
 checkpoints/
 *.ckpt
-*.pth
 *.h5
 
 # Data files
