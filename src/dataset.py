@@ -31,7 +31,7 @@ class TextDataset(Dataset):
 
         pairs = content.split('\n\n') # split by double new line
         # print(f"Pairs : {pairs} ")
-        self.qa_pairs = [] # List to store question-answer pairs
+        self.sequences = []
 
         # Extract question-answer pairs
         for pair in pairs:
@@ -39,57 +39,43 @@ class TextDataset(Dataset):
                 # Splits at "Question: ", taking everything after it. Further splits at "\nAnswer: ", extracting only the question text.
                 question = pair.split('Question: ')[1].split('\nAnswer: ')[0] 
                 answer = pair.split('Answer: ')[1]
-                self.qa_pairs.append((question, answer))
-                # print(f"QA: {self.qa_pairs}") # Debugging
+                full_sequence = f"Question: {question} Answer: {answer}"
+                self.sequences.append(full_sequence)
 
             except:
                 continue #If a pair doesn’t follow the expected format, it skips that entry.
 
     def __len__(self):
-        return len(self.qa_pairs) # Number of question-answer pairs
+        return len(self.sequences) # Number of question-answer pairs
     
     def __getitem__(self, idx):
-        question, answer = self.qa_pairs[idx]
-        
-        # Format as: "Question: {question} Answer: {answer}"
-        input_text = f"Question: {question} Answer: "
-        target_text = answer
-        
-        # Tokenize input
-        input_encodings = self.tokenizer(
-            input_text,
+        sequence = self.sequences[idx]
+        # print(f"Sequence {idx}: {sequence}")  # Debug single sequence
+        encodings = self.tokenizer(
+            sequence,
             max_length=self.max_length,
             padding='max_length',
             truncation=True,
             return_tensors='pt'
         )
-        
-        # Tokenize target
-        target_encodings = self.tokenizer(
-            target_text,
-            max_length=self.max_length,
-            padding='max_length',
-            truncation=True,
-            return_tensors='pt'
-        )
-        
+
+        input_ids = encodings['input_ids'].squeeze(0)
+        # print(f"After squeeze, input_ids shape: {input_ids.shape}")  # Debug shape
+        attention_mask = encodings['attention_mask'].squeeze(0)
         return {
-            'input_ids': input_encodings['input_ids'].squeeze(),
-            'attention_mask': input_encodings['attention_mask'].squeeze(),
-            'target_ids': target_encodings['input_ids'].squeeze(),
-            'target_attention_mask': target_encodings['attention_mask'].squeeze()
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'labels': input_ids.clone()  # Labels are the same as input_ids, shifted during loss computation
         }
     
 """Example output of the dataset:
 {
     'input_ids': tensor([32, 521, 123, ...]),   # Question tokens
     'attention_mask': tensor([1, 1, 1, ...]),   # 1 for real tokens, 0 for padding
-    'target_ids': tensor([456, 789, 12, ...]),  # Answer tokens
-    'target_attention_mask': tensor([1, 1, 1, ...])
 }
 """
 
-# # Initialize tokenizer and dataset
+# # Testing this dataset class
 # tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
 # """
 # Problem: GPT-2 Has No Native Padding Token
@@ -100,10 +86,10 @@ class TextDataset(Dataset):
 # tokenizer.pad_token = tokenizer.eos_token 
 
 # train_dataset = TextDataset('processed_data/training_data_02.txt', tokenizer)
-# print(len(train_dataset)) # Number of question-answer pairs
-# print(train_dataset[0]) # First question-answer pair
+# print(len(train_dataset)) # Number of sequences to be processed
+# # print(train_dataset[0])
 
-
-
-
-
+# # Check the first sequence
+# print(f"Input IDs: {train_dataset[0]['input_ids']}")
+# print(f"Attention Mask: {train_dataset[0]['attention_mask']}")
+# print(f"Labels: {train_dataset[0]['labels']}")
