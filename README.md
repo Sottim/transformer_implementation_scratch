@@ -1,96 +1,115 @@
-# Transformer Architecture Project
+# Transformer Architecture: Implementation from Scratch
 
-## Cloning the Project
+This repository contains a comprehensive implementation of the Transformer architecture from scratch. The project includes data preprocessing, model training, and deployment for natural language understanding tasks.
 
-To get started, clone this repository using:
+## 📌 Getting Started
+
+### 1️⃣ Clone the Repository
+To begin, clone the repository and navigate to the project directory:
 
 ```bash
 git clone https://github.com/Sottim/transformer_implementation_scratch.git
 cd transformer_arch
 ```
 
-## Setup Instructions
+---
 
-### 1. Setting Up the Environment
-
-Set up the environment using Conda:
+### 2️⃣ Environment Setup
+#### Creating and Activating the Conda Environment
+Ensure all required dependencies are installed by creating a Conda environment:
 
 ```bash
 conda env create -f environment.yml
-```
-
-Then, activate the environment:
-
-```bash
 conda activate llm
 ```
 
-### Updating the Environment
-If you add more dependencies later, update `environment.yml` and run:
+#### 🔄 Updating the Environment
+If new dependencies are added, update the environment using:
 
 ```bash
 conda env update --file environment.yml --prune
 ```
 
+---
 
-### 2. Verify Installation
-Ensure the installation is successful by running the provided Python notebooks in notebooks direcotry:
+### 3️⃣ Verifying Installation
+Confirm successful installation by running the provided Jupyter notebooks:
 
 ```bash
-notebook 01.ipynb
-notebook 02.ipynb
+jupyter notebook notebooks/01.ipynb
+jupyter notebook notebooks/02.ipynb
 ```
 
-### 3. Create Data Directory
-Before proceeding, create a directory to store training data:
+---
+
+## 📂 Dataset Preparation
+
+### 🔹 Creating the Data Directory
+Before processing data, create a directory to store the training dataset:
 
 ```bash
 mkdir processed_data
 ```
 
-Inside the `processed_data` directory, you will write the `training_data.txt` file.
+This directory will store the processed training dataset.
 
----
+### 🔹 Running Preprocessing Scripts
 
-## Dataset Preprocessing & Processing
-
-The `prepare_data` directory contains two scripts responsible for downloading and processing datasets.
-
-### **1. Run `data.py`**
-
-This script downloads and processes the **SQuAD V2 dataset** and stores it in `./processed_data/training_data_01.txt` in **Question-Answer format**.
+#### 🏗 Step 1: Run `data.py`
+This script downloads and processes the **SQuAD V2 dataset**, formatting it into a Question-Answer structure.
 
 ```bash
 python prepare_data/data.py
 ```
 
-### **2. Run `append-nq-data.py`**
-
-This script downloads the **Natural Questions (NQ) dataset** and appends it to `./processed_data/training_data_01.txt`.
+#### 🏗 Step 2: Run `append-nq-data.py`
+This script appends the **Natural Questions (NQ) dataset** to the processed data.
 
 ```bash
 python prepare_data/append-nq-data.py
 ```
 
-### **Final Processed Dataset**
-After running both scripts, the final dataset for training will be stored in:
+#### 📌 Final Processed Dataset
+After both scripts are executed, the processed dataset will be available at:
 
 ```
 ./processed_data/training_data_01.txt
 ```
 
-This file contains questions and answers formatted for model training.
+---
+
+## 🚀 Model Training
+Initiate the training process by running the training script:
+
+```bash
+python src/train.py
+```
+
+#### 💾 Model Checkpoints & Weights
+- Trained model weights are stored in the **`saved_model`** directory.
+- Model checkpoints are stored in the **`checkpoints`** directory.
 
 ---
 
-## Model Training
+## 🎯 Running the Application
+Deploy the trained model using the following command:
 
+```bash
+python app.py
+```
 
+Once executed, the application will be accessible at local host with port: 8000:
 
-## Notes
-- Ensure that all dependencies are installed before running the scripts.
-- Modify `data.py` and `append-nq-data.py` if you need to process additional datasets.
-- The processed dataset will be used for training the transformer model.
+```
+http://0.0.0.0:8000
+```
 
-Happy Coding! 🚀
+---
+
+## 📌 Notes
+- Ensure all dependencies are installed before running the scripts.
+- Modify `data.py` and `append-nq-data.py` to include additional datasets if needed.
+- The processed dataset will serve as input for training the Transformer model.
+
+---
 
