@@ -7,48 +7,40 @@ from transformers import GPT2Tokenizer
 from src.transformer import Transformer 
 from contextlib import asynccontextmanager
 from fastapi.responses import FileResponse
+from src.logger import log  # Import log function from logger.py
 
 app = FastAPI()
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8000", "*"],  # Allow all origins for simplicity; restrict in production
+    allow_origins=["http://localhost:8000", "*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],  
-    allow_headers=["*"], 
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
 )
 
-# Mount the frontend directory for static files
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
-# Paths to your trained model weights
-MODEL_PATH = "./save_model/transformer_best.pth"
+MODEL_PATH = "./save_model/best_model.pth"
 
-# Model hyperparameters (must match train.py)
-batch_size = 16
-num_layers = 6
-num_heads = 8
-d_model = 512
-d_ff = 2048
-dropout = 0.3
+num_layers = 12
+num_heads = 12
+d_model = 768
+d_ff = 3072
+dropout = 0.1
 max_seq_len = 512
 
-# Initialize tokenizer
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 tokenizer.pad_token = tokenizer.eos_token
-input_vocab_size = tokenizer.vocab_size
-target_vocab_size = tokenizer.vocab_size
+vocab_size = tokenizer.vocab_size
 
-# Initialize model with the same architecture as in train.py
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = Transformer(
     num_layers=num_layers,
     d_model=d_model,
     num_heads=num_heads,
     d_ff=d_ff,
-    input_vocab_size=input_vocab_size,
-    target_vocab_size=target_vocab_size,
+    vocab_size=vocab_size,
     max_seq_len=max_seq_len,
     dropout=dropout
 ).to(device)
@@ -56,12 +48,13 @@ model = Transformer(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
+        log(f"Loading model state from: {MODEL_PATH}")
         state_dict = torch.load(MODEL_PATH, map_location=device)
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=True)
         model.eval()
-        print("Model and tokenizer loaded successfully!")
+        log("Model and tokenizer loaded successfully!")
     except Exception as e:
-        print(f"Error loading model: {str(e)}")
+        log(f"Error loading model: {str(e)}")
         raise
     yield
 
@@ -72,8 +65,9 @@ class Query(BaseModel):
 
 @app.post("/answer/")
 async def answer_question(query: Query):
-    question = f"Question: {query.question.strip()}"
+    question = f"Question: {query.question.strip()} Answer: "
     try:
+        log(f"Processing question: {question}")
         input_ids = tokenizer.encode(
             question,
             return_tensors="pt",
@@ -81,28 +75,30 @@ async def answer_question(query: Query):
             truncation=True,
             max_length=max_seq_len
         ).to(device)
-        
-        src_mask = (input_ids != tokenizer.pad_token_id).float().to(device)
-        
+        log(f"Input IDs shape: {input_ids.shape}")
+            
         with torch.no_grad():
+            log("Calling model.generate...")
             output_ids = model.generate(
                 src=input_ids,
-                src_mask=src_mask,
-                max_length=50,
-                temperature=0.1,
-                top_k=20,
-                top_p=0.9,
-                do_sample=False,
+                max_length=100,
+                temperature=0.7,
+                top_k=50,
                 tokenizer=tokenizer
             )
+            log(f"Output IDs: {output_ids}")
         
         output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-        answer = output_text.replace(question, "").strip()
+        log(f"Generated text: {output_text}")
+        
         if "Answer:" in output_text:
             answer = output_text.split("Answer:")[1].strip()
+        else:
+            answer = output_text.strip()
         
-        return {"question": question, "answer": answer}
+        return {"question": query.question, "answer": answer}
     except Exception as e:
+        log(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error generating answer: {str(e)}")
 
 @app.get("/", include_in_schema=False)
