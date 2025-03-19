@@ -18,10 +18,10 @@ class MultiheadAttention(nn.Module):
         self.head_dim = d_model // num_heads
 
         # Linear layers for Q, K, V, and output
-        self.q_linear = nn.Linear(d_model, d_model)
-        self.k_linear = nn.Linear(d_model, d_model)
-        self.v_linear = nn.Linear(d_model, d_model)
-        self.output_linear = nn.Linear(d_model, d_model)
+        self.q_linear = nn.Linear(d_model, d_model, bias=True)
+        self.k_linear = nn.Linear(d_model, d_model, bias=True)
+        self.v_linear = nn.Linear(d_model, d_model, bias=True)
+        self.output_linear = nn.Linear(d_model, d_model, bias=True)
 
     def scaled_dot_product_attention(self, query, key, value, mask=None):
         attention_score = torch.matmul(query, key.transpose(-2, -1)) / torch.sqrt(torch.tensor(self.head_dim).float())
@@ -42,12 +42,7 @@ class MultiheadAttention(nn.Module):
         """
         
         if mask is not None:
-            if mask.dim() == 2:
-                mask = mask.unsqueeze(1).unsqueeze(2)
-            mask = mask.expand_as(attention_score)
-            attention_score = attention_score.masked_fill(mask == 0, -1e9) # Wherever mask == 0, we replace those positions with -1e9.
-                                                                            # This is a very large negative number that makes those values effectively zero after applying softmax().
-        
+            attention_score = attention_score + mask  # Mask is broadcasted       
         attention_probs = torch.nn.functional.softmax(attention_score, dim=-1)
         output = torch.matmul(attention_probs, value)
         return output
@@ -101,183 +96,105 @@ class MultiheadAttention(nn.Module):
 
         return output
 
-class EncoderLayer(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, dropout):
-        super(EncoderLayer, self).__init__()
-
-        self.multi_head_attention = MultiheadAttention(d_model, num_heads)
-
-        self.feed_forward = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.ReLU(),
-            nn.Linear(d_ff, d_model)
-        )
-
-        # Layer normalization and dropout
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    """src_mask is for masking source sequence. It ensures the model doesn't attend to padding tokens in the input sequence."""
-    def forward(self, x, src_mask=None):
-        # Multi-head attention layer with residual connection (original input x) and layer normalization
-        attention_output = self.multi_head_attention(x, x, x, src_mask)
-        attention_output = self.dropout(attention_output)
-        x = self.norm1(x + attention_output)
-
-        # Feed forward layer with residual connection (output of multi-head attention) and layer normalization
-        feed_forward_output = self.feed_forward(x)
-        feed_forward_output = self.dropout(feed_forward_output)
-        x = self.norm2(x + feed_forward_output)
-
-        return x
-
 
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, dropout):
-        super(DecoderLayer, self).__init__()
-
-        self.multi_head_attention = MultiheadAttention(d_model, num_heads)
-        self.cross_attention = MultiheadAttention(d_model, num_heads)
-
+        super().__init__()
+        self.self_attention = MultiheadAttention(d_model, num_heads)  # Renamed for clarity
         self.feed_forward = nn.Sequential(
-            nn.Linear(d_model, d_ff),
+            nn.Linear(d_model, d_ff, bias=True),
             nn.ReLU(),
-            nn.Linear(d_ff, d_model)
+            nn.Linear(d_ff, d_model, bias=True)
         )
-
+        # Pre-layer normalization (GPT-2 style)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
     """src_mask is for masking source sequence. It ensures the model doesn't attend to padding tokens in the input sequence.
         tgt_mask is for masking target sequence. It ensures the model doesn't peek ahead at the target sequence.
     """
-    def forward(self, x, encoder_output, src_mask=None, tgt_mask=None):
-        # Masked multi-head attention layer with residual connection (original input x) and layer normalization
-        attention_output = self.multi_head_attention(x, x, x, tgt_mask)
-        attention_output = self.dropout(attention_output)
-        x = self.norm1(x + attention_output)
 
-        # Multi-head attention layer with residual connection (output of masked multi-head attention) and layer normalization
-        cross_attention_output = self.cross_attention(x, encoder_output, encoder_output, src_mask)
-        cross_attention_output = self.dropout(cross_attention_output)
-        x = self.norm2(x + cross_attention_output)
-
-        # Feed forward layer with residual connection (output of multi-head attention) and layer normalization
-        feed_forward_output = self.feed_forward(x)
-        feed_forward_output = self.dropout(feed_forward_output)
-        x = self.norm3(x + feed_forward_output)
-
+    def forward(self, x, mask=None):
+        # Pre-LN: Normalize before attention
+        x_norm = self.norm1(x)
+        attn_output = self.self_attention(x_norm, x_norm, x_norm, mask)
+        x = x + self.dropout(attn_output)  # Residual connection
+        # Pre-LN: Normalize before FFN
+        x_norm = self.norm2(x)
+        ff_output = self.feed_forward(x_norm)
+        x = x + self.dropout(ff_output)  # Residual connection
         return x
-        
+    
+
 class Transformer(nn.Module):
-    def __init__(self, num_layers, d_model, num_heads, d_ff, input_vocab_size, target_vocab_size, max_seq_len, dropout=0.1):
+    def __init__(self, num_layers, d_model, num_heads, d_ff, vocab_size, max_seq_len, dropout=0.1):
         super().__init__()
+        self.d_model = d_model
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        # self.positional_encoding = self.create_positional_encoding(max_seq_len, d_model)
+        # Use learnable positional embeddings instead of fixed ones
+        self.positional_encoding = nn.Embedding(max_seq_len, d_model)
 
-        # Embedding layers for input and target sequences
-        self.encoder_embedding = nn.Embedding(input_vocab_size, d_model)
-        self.decoder_embedding = nn.Embedding(target_vocab_size, d_model)
-        # Positional encoding
-        self.positional_encoding = self.create_positional_encoding(max_seq_len, d_model)
-
-        # Encoder and decoder layers
-        self.encoder_layers = nn.ModuleList(
-            [EncoderLayer(d_model, num_heads, d_ff, dropout) for i in range(num_layers)])
-        
-        self.decoder_layers = nn.ModuleList(
-            [DecoderLayer(d_model, num_heads, d_ff, dropout) for i in range(num_layers)])
-        
-        # Final linear layer with droupout
-        self.final_layer = nn.Linear(d_model, target_vocab_size)
+        self.decoder_layers = nn.ModuleList([
+            DecoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)
+        ])
+        self.final_layer = nn.Linear(d_model, vocab_size, bias=True)
         self.dropout = nn.Dropout(dropout)
 
-    def create_positional_encoding(self, max_seq_len, d_model):
-        pos_encoding = torch.zeros(max_seq_len, d_model)
-        position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pos_encoding[:, 0::2] = torch.sin(position * div_term)
-        pos_encoding[:, 1::2] = torch.cos(position * div_term)
-        return pos_encoding.unsqueeze(0)
+    # def create_positional_encoding(self, max_seq_len, d_model):
+    #     pos_encoding = torch.zeros(max_seq_len, d_model)
+    #     position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
+    #     div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+    #     pos_encoding[:, 0::2] = torch.sin(position * div_term)
+    #     pos_encoding[:, 1::2] = torch.cos(position * div_term)
+    #     return pos_encoding.unsqueeze(0)
 
-    # Needed to prevent decorder from cheating -> looking ahead 
-    def generate_square_subsequent_mask(self, size):
-        # Create an upper-triangular matrix filled with ones and convert the mask to float, replacing 0s with -inf and 1s with 0
-        mask = (torch.triu(torch.ones(size, size))== 1).transpose(0,1)
+    def generate_causal_mask(self, size):
+        mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask
+        return mask.view(1, 1, size, size)
 
-    def forward(self, src, tgt=None, src_mask=None, tgt_mask=None):
-        if tgt is None:
-            tgt = src
-        
-        if src_mask is None:
-            src_mask = src.mask.unsqueeze(1).unsqueeze(2)
-        if tgt_mask is None:
-            tgt_mask = tgt.mask.unsqueeze(1).unsqueeze(2)
+    def forward(self, src, mask=None):
+        batch_size, seq_len = src.shape
+        if mask is None:
+            mask = self.generate_causal_mask(seq_len).to(src.device)
+        # Generate position indices
+        positions = torch.arange(0, seq_len).expand(batch_size, seq_len).to(src.device)
+        x = self.embedding(src) * math.sqrt(self.d_model)
 
-        src = self.encoder_embedding(src) * math.sqrt(self.encoder_embedding.embedding_dim)
-        tgt = self.decoder_embedding(tgt) * math.sqrt(self.decoder_embedding.embedding_dim)
+        # Add learnable positional embeddings
+        x = x + self.positional_encoding(positions)
+        x = self.dropout(x)
+        for layer in self.decoder_layers:
+            x = layer(x, mask)
+        return self.final_layer(x)
 
-        src = src + self.positional_encoding[:, :src.size(1), :].to(src.device)
-        tgt = tgt + self.positional_encoding[:, :tgt.size(1), :].to(tgt.device)
-        
-        
-        src = self.dropout(src)
-        tgt = self.dropout(tgt)
-
-        encoder_output = src
-        for enc_layer in self.encoder_layers:
-            encoder_output = enc_layer(encoder_output, src_mask)
-
-        decoder_output = tgt
-        for dec_layer in self.decoder_layers:
-            decoder_output = dec_layer(decoder_output, encoder_output, src_mask, tgt_mask)
-
-        output = self.final_layer(decoder_output)
-        return output
-    
-    def generate(self, src, src_mask, max_length=100, temperature=0.7, top_k=40, top_p=0.9, do_sample=False, tokenizer=None):
+    def generate(self, src, max_length=100, temperature=0.7, top_k=50, tokenizer=None):
         if tokenizer is None:
-            raise ValueError("Tokenizer must be provided for generation")
-        
+            raise ValueError("Tokenizer required")
         self.eval()
-        batch_size = src.size(0)
         generated = src.clone()
-        
         with torch.no_grad():
             for _ in range(max_length - src.size(1)):
-                outputs = self(src=generated, tgt=generated, src_mask=src_mask, tgt_mask=src_mask)
+                mask = self.generate_causal_mask(generated.size(1)).to(src.device)
+                outputs = self(generated, mask)
                 next_token_logits = outputs[:, -1, :] / temperature
                 
-                if do_sample:
-                    filtered_logits = self.top_k_top_p_filtering(next_token_logits, top_k, top_p)
-                    next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
-                else:
-                    next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+                # Apply top-k filtering
+                top_k_logits, _ = torch.topk(next_token_logits, top_k, dim=-1)
+                min_top_k = top_k_logits[:, -1].unsqueeze(-1)
+                next_token_logits = torch.where(
+                    next_token_logits < min_top_k,
+                    torch.full_like(next_token_logits, float('-inf')),
+                    next_token_logits
+                )
+                
+                # Sample from the filtered distribution
+                next_token_probs = torch.nn.functional.softmax(next_token_logits, dim=-1)
+                next_token = torch.multinomial(next_token_probs, num_samples=1)
                 
                 generated = torch.cat([generated, next_token], dim=1)
-                src_mask = torch.cat([src_mask, torch.ones(batch_size, 1).to(src.device)], dim=1)
-                
-                if (next_token == tokenizer.eos_token_id).all():
+                if next_token.item() == tokenizer.eos_token_id:
                     break
-        
         return generated
-
-    def top_k_top_p_filtering(self, logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
-        if top_k > 0:
-            top_k = min(top_k, logits.size(-1))
-            indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-            logits[indices_to_remove] = filter_value
-
-        if top_p > 0.0:
-            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-            sorted_indices_to_remove = cumulative_probs > top_p
-            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-            sorted_indices_to_remove[..., 0] = 0
-            indices_to_remove = sorted_indices[sorted_indices_to_remove]
-            logits[indices_to_remove] = filter_value
-
-        return logits
