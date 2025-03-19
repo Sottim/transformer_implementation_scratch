@@ -23,5 +23,4 @@ checkpoints/
 
 # Data files
 processed_data/
-*.txt
 *.csv
